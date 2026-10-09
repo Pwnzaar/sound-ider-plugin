@@ -1,50 +1,38 @@
 # Sound IDer
 
-Sound IDer is a diagnostic RuneLite plugin for identifying live sound events. It displays raw sound IDs, event types and, where available, the actor associated with an event.
+This branch is a JSON-only test version of Sound IDer.
 
-## Features
+Sound IDer logs raw RuneLite sound events to a local JSONL file for later inspection. It does not display sound IDs in the RuneLite side panel or in a pop-out window.
 
-- Live Sound Effect, Area Sound and Ambient Sound IDs
-- Start / Stop logging
-- Clear history
-- Pop-out resizable window
-- Separate Display and Consume toggles for Effects, Area and Ambient
-- ID-only mode by default
-- Optional source information for NPCs, players and environment sounds
-- Best-effort actor source attribution when RuneLite does not provide one directly
-- Optional `[E]`, `[A]`, `[M]` type prefixes
-- Out-of-range area sound detection
-- Filter/search and copy actions
-- Shared history between side panel and pop-out
-- Optional local JSONL event export for debugging and analysis
+## What is logged
 
-## JSONL export
+- Sound Effect events
+- Area Sound events
+- Ambient Sound events
+- Sound ID
+- Event type
+- Timestamp and sequence number
+- Best-effort actor/source information where available
+- Whether an area sound was audible
 
-Sound IDer can optionally export detected sound events to a local JSONL file for debugging and analysis.
+Source attribution is best-effort only. If RuneLite does not provide a source directly, Sound IDer may use recent actor activity or an unambiguous actor on the sound tile. If it cannot determine a source safely, the source remains `Unknown`.
 
-The file is stored at:
+## JSONL file
 
-`.runelite/plugin-data/sound-ider/events.jsonl`
+Events are appended to:
 
-Each line contains the sound ID, event type and source information where available.
+`~/.runelite/plugin-data/sound-ider/events.jsonl`
 
-The export mirrors the live feed and does not make network requests, launch external programs or read data back from companion applications.
+Example:
 
-## Diagnostic scope
+```json
+{"sequence":1,"timestamp":1780912345678,"soundId":3812,"type":"AREA","source":"Guard","sourceId":3010,"sourceType":"NPC","audible":true}
+```
 
-Sound IDer reports factual sound events that have already occurred. It does not assign gameplay meaning to individual sound IDs.
+To watch the test output live from a terminal:
 
-The plugin does not provide:
+```bash
+tail -f ~/.runelite/plugin-data/sound-ider/events.jsonl
+```
 
-- ID-specific colours or mechanic labels
-- Configurable mechanic alerts
-- Replacement sounds
-- Attack or mechanic predictions
-- Prayer recommendations
-- Attack counters
-- Tile guidance
-- NPC targeting or focus information
-- Mouse or keyboard input
-- Any other form of gameplay automation
-
-Source attribution is best-effort only. If RuneLite does not provide a source directly, Sound IDer may use recent actor activity or an unambiguous actor on the sound tile to identify a likely source. If it cannot do so safely, the source remains `Unknown`.
+The plugin itself does not display the IDs in RuneLite. The JSONL file is intended for later inspection and diagnostic cataloguing.
