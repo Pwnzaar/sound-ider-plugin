@@ -44,7 +44,7 @@ import org.slf4j.LoggerFactory;
 @PluginDescriptor(
 	name = "Sound IDer",
 	internalName = "sound-ider",
-	description = "Live sound ID inspector with source identification and optional sound consuming",
+	description = "Diagnostic inspector for live RuneLite sound IDs, event types and best-effort actor sources.",
 	tags = {"sound", "audio", "debug", "developer", "id", "npc"}
 )
 public class SoundIDerPlugin extends Plugin
