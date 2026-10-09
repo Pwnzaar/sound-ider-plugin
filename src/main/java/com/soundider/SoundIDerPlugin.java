@@ -2,11 +2,6 @@ package com.soundider;
 
 import com.google.gson.Gson;
 import com.google.inject.Provides;
-import java.awt.BasicStroke;
-import java.awt.Color;
-import java.awt.Graphics2D;
-import java.awt.RenderingHints;
-import java.awt.image.BufferedImage;
 import java.nio.file.StandardOpenOption;
 import java.util.ArrayDeque;
 import java.util.LinkedHashSet;
@@ -15,7 +10,6 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicLong;
 import javax.inject.Inject;
-import javax.swing.SwingUtilities;
 import net.runelite.api.Actor;
 import net.runelite.api.AmbientSoundEffect;
 import net.runelite.api.Client;
@@ -35,8 +29,6 @@ import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.events.ConfigChanged;
 import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
-import net.runelite.client.ui.ClientToolbar;
-import net.runelite.client.ui.NavigationButton;
 import net.runelite.client.util.Filepath;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -44,7 +36,7 @@ import org.slf4j.LoggerFactory;
 @PluginDescriptor(
 	name = "Sound IDer",
 	internalName = "sound-ider",
-	description = "Diagnostic inspector for live RuneLite sound IDs, event types and best-effort actor sources.",
+	description = "Logs raw RuneLite sound events to a local JSONL file for later inspection.",
 	tags = {"sound", "audio", "debug", "developer", "id", "npc"}
 )
 public class SoundIDerPlugin extends Plugin
@@ -56,21 +48,14 @@ public class SoundIDerPlugin extends Plugin
 
 	@Inject private Client client;
 	@Inject private ClientThread clientThread;
-	@Inject private ClientToolbar clientToolbar;
-	@Inject private ConfigManager configManager;
 	@Inject private SoundIDerConfig config;
 	@Inject private Gson gson;
 
-	private final SoundLogTableModel logModel = new SoundLogTableModel();
 	private final AtomicLong exportSequence = new AtomicLong();
 	private final ArrayDeque<RecentAnimation> recentAnimations = new ArrayDeque<>();
 	private ExecutorService exportExecutor;
 	private volatile Filepath exportFile;
 	private Gson exportGson;
-	private volatile boolean recording = true;
-	private NavigationButton navigationButton;
-	private SoundIDerPanel panel;
-	private SoundIDerWindow popOutWindow;
 
 	@Provides
 	SoundIDerConfig provideConfig(ConfigManager manager)
@@ -81,7 +66,6 @@ public class SoundIDerPlugin extends Plugin
 	@Override
 	protected void startUp()
 	{
-		recording = true;
 		exportSequence.set(0);
 		recentAnimations.clear();
 		exportFile = null;
@@ -92,25 +76,12 @@ public class SoundIDerPlugin extends Plugin
 			thread.setDaemon(true);
 			return thread;
 		});
-		logModel.setDisplayOptions(config.showSource(), config.showType());
-		SwingUtilities.invokeLater(() ->
-		{
-			panel = new SoundIDerPanel(this, config, configManager, logModel);
-			navigationButton = NavigationButton.builder()
-				.tooltip("Sound IDer")
-				.icon(createIcon())
-				.priority(6)
-				.panel(panel)
-				.build();
-			clientToolbar.addNavigation(navigationButton);
-		});
 		scanLoadedAmbientSounds();
 	}
 
 	@Override
 	protected void shutDown()
 	{
-		recording = false;
 		recentAnimations.clear();
 		if (exportExecutor != null)
 		{
@@ -118,69 +89,70 @@ public class SoundIDerPlugin extends Plugin
 			exportExecutor = null;
 		}
 		exportFile = null;
-		if (config.consumeAmbient())
-		{
-			reloadScene();
-		}
-		SwingUtilities.invokeLater(() ->
-		{
-			if (navigationButton != null) clientToolbar.removeNavigation(navigationButton);
-			if (panel != null) panel.dispose();
-			if (popOutWindow != null) popOutWindow.dispose();
-			navigationButton = null;
-			panel = null;
-			popOutWindow = null;
-			logModel.clear();
-		});
 	}
 
 	@Subscribe
 	public void onAnimationChanged(AnimationChanged event)
 	{
 		Actor actor = event.getActor();
-		if (actor == null || actor.getName() == null || actor.getAnimation() < 0) return;
+		if (actor == null || actor.getName() == null || actor.getAnimation() < 0)
+		{
+			return;
+		}
 
 		recentAnimations.addLast(new RecentAnimation(actor, client.getGameCycle()));
-		while (recentAnimations.size() > MAX_RECENT_ANIMATIONS) recentAnimations.removeFirst();
+		while (recentAnimations.size() > MAX_RECENT_ANIMATIONS)
+		{
+			recentAnimations.removeFirst();
+		}
 		pruneRecentAnimations();
 	}
 
 	@Subscribe
 	public void onSoundEffectPlayed(SoundEffectPlayed event)
 	{
-		if (config.consumeEffects()) event.consume();
-		if (recording && config.showEffects())
+		if (!config.logEffects())
 		{
-			Actor source = event.getSource();
-			if (source == null) source = inferAnimationSource();
-			addActorSound(event.getSoundId(), SoundKind.EFFECT, source, true);
+			return;
 		}
+
+		Actor source = event.getSource();
+		if (source == null)
+		{
+			source = inferAnimationSource();
+		}
+		exportActorSound(event.getSoundId(), SoundKind.EFFECT, source, true);
 	}
 
 	@Subscribe
 	public void onAreaSoundEffectPlayed(AreaSoundEffectPlayed event)
 	{
-		if (config.consumeArea()) event.consume();
-		if (!recording || !config.showArea()) return;
+		if (!config.logArea())
+		{
+			return;
+		}
 
 		boolean audible = isAreaSoundAudible(event);
-		if (audible || config.showInaudibleArea())
+		if (!audible && !config.logInaudibleArea())
 		{
-			Actor source = event.getSource();
-			if (source == null)
-			{
-				source = inferAreaSource(event);
-			}
-			addActorSound(event.getSoundId(), SoundKind.AREA, source, audible);
+			return;
 		}
+
+		Actor source = event.getSource();
+		if (source == null)
+		{
+			source = inferAreaSource(event);
+		}
+		exportActorSound(event.getSoundId(), SoundKind.AREA, source, audible);
 	}
 
 	@Subscribe
 	public void onAmbientSoundEffectCreated(AmbientSoundEffectCreated event)
 	{
-		AmbientSoundEffect ambient = event.getAmbientSoundEffect();
-		if (recording && config.showAmbient()) addAmbientSound(ambient, "Ambient");
-		if (config.consumeAmbient()) clearAmbientSounds();
+		if (config.logAmbient())
+		{
+			exportAmbientSound(event.getAmbientSoundEffect(), "Ambient");
+		}
 	}
 
 	@Subscribe
@@ -191,87 +163,63 @@ public class SoundIDerPlugin extends Plugin
 			recentAnimations.clear();
 			return;
 		}
-		if (recording && config.showAmbient()) scanLoadedAmbientSoundsNow();
-		if (config.consumeAmbient()) clearAmbientSounds();
+
+		if (config.logAmbient())
+		{
+			scanLoadedAmbientSoundsNow();
+		}
 	}
 
 	@Subscribe
 	public void onConfigChanged(ConfigChanged event)
 	{
-		if (!SoundIDerConfig.GROUP.equals(event.getGroup())) return;
-		if ("consumeAmbient".equals(event.getKey())) reloadScene();
-		if ("showAmbient".equals(event.getKey()) && config.showAmbient() && recording) scanLoadedAmbientSounds();
-
-		SwingUtilities.invokeLater(() ->
+		if (!SoundIDerConfig.GROUP.equals(event.getGroup()))
 		{
-			logModel.setDisplayOptions(config.showSource(), config.showType());
-			if (panel != null) panel.refreshFromConfig();
-			if (popOutWindow != null) popOutWindow.refreshFromConfig();
-		});
-	}
+			return;
+		}
 
-	boolean isRecording() { return recording; }
-
-	void setRecording(boolean value)
-	{
-		recording = value;
-		if (recording && config.showAmbient()) scanLoadedAmbientSounds();
-		SwingUtilities.invokeLater(() ->
+		if ("logAmbient".equals(event.getKey()) && config.logAmbient())
 		{
-			if (panel != null) panel.refreshRecordingState();
-			if (popOutWindow != null) popOutWindow.refreshRecordingState();
-		});
-	}
-
-	void clearLog()
-	{
-		SwingUtilities.invokeLater(logModel::clear);
-	}
-
-	void showPopOutWindow()
-	{
-		SwingUtilities.invokeLater(() ->
-		{
-			if (popOutWindow == null) popOutWindow = new SoundIDerWindow(this, config, configManager, logModel);
-			popOutWindow.setVisible(true);
-			popOutWindow.toFront();
-		});
-	}
-
-	private void reloadScene()
-	{
-		clientThread.invokeLater(() ->
-		{
-			if (client.getGameState() == GameState.LOGGED_IN) client.setGameState(GameState.LOADING);
-		});
+			scanLoadedAmbientSounds();
+		}
 	}
 
 	private boolean isAreaSoundAudible(AreaSoundEffectPlayed event)
 	{
 		Player player = client.getLocalPlayer();
-		if (player == null) return true;
+		if (player == null)
+		{
+			return true;
+		}
+
 		LocalPoint point = player.getLocalLocation();
-		if (point == null) return true;
+		if (point == null)
+		{
+			return true;
+		}
+
 		int distance = Math.abs(point.getSceneX() - event.getSceneX())
 			+ Math.abs(point.getSceneY() - event.getSceneY());
 		return distance <= event.getRange();
 	}
 
-	/**
-	 * Lightweight fallback for area sounds where RuneLite does not provide an actor.
-	 * Only returns a source when exactly one loaded NPC/player occupies the sound tile.
-	 */
 	private Actor inferAreaSource(AreaSoundEffectPlayed event)
 	{
 		WorldView worldView = client.getTopLevelWorldView();
-		if (worldView == null) return null;
+		if (worldView == null)
+		{
+			return null;
+		}
 
 		Actor match = null;
 		for (NPC npc : worldView.npcs())
 		{
 			if (isOnSoundTile(npc, event))
 			{
-				if (match != null) return null;
+				if (match != null)
+				{
+					return null;
+				}
 				match = npc;
 			}
 		}
@@ -280,7 +228,10 @@ public class SoundIDerPlugin extends Plugin
 		{
 			if (isOnSoundTile(player, event))
 			{
-				if (match != null) return null;
+				if (match != null)
+				{
+					return null;
+				}
 				match = player;
 			}
 		}
@@ -296,16 +247,13 @@ public class SoundIDerPlugin extends Plugin
 			&& point.getSceneY() == event.getSceneY();
 	}
 
-	/**
-	 * Passive fallback for source-less effect sounds. It only considers actors whose
-	 * animation changed in the immediately preceding client cycles. If the local
-	 * player's current interaction target is among those actors, prefer it; otherwise
-	 * only return a source when the recent actor is unambiguous.
-	 */
 	private Actor inferAnimationSource()
 	{
 		pruneRecentAnimations();
-		if (recentAnimations.isEmpty()) return null;
+		if (recentAnimations.isEmpty())
+		{
+			return null;
+		}
 
 		Player localPlayer = client.getLocalPlayer();
 		Actor interactionTarget = localPlayer == null ? null : localPlayer.getInteracting();
@@ -313,15 +261,24 @@ public class SoundIDerPlugin extends Plugin
 		{
 			for (RecentAnimation recent : recentAnimations)
 			{
-				if (recent.actor == interactionTarget) return interactionTarget;
+				if (recent.actor == interactionTarget)
+				{
+					return interactionTarget;
+				}
 			}
 		}
 
 		Actor match = null;
 		for (RecentAnimation recent : recentAnimations)
 		{
-			if (match == null) match = recent.actor;
-			else if (match != recent.actor) return null;
+			if (match == null)
+			{
+				match = recent.actor;
+			}
+			else if (match != recent.actor)
+			{
+				return null;
+			}
 		}
 		return match;
 	}
@@ -347,11 +304,12 @@ public class SoundIDerPlugin extends Plugin
 		}
 	}
 
-	private void addActorSound(int soundId, SoundKind kind, Actor source, boolean audible)
+	private void exportActorSound(int soundId, SoundKind kind, Actor source, boolean audible)
 	{
 		String sourceName;
 		String sourceType;
 		Integer sourceId = null;
+
 		if (source instanceof NPC)
 		{
 			NPC npc = (NPC) source;
@@ -370,24 +328,52 @@ public class SoundIDerPlugin extends Plugin
 			sourceType = kind == SoundKind.AREA ? "Environment" : "Unknown";
 			sourceName = "Unknown";
 		}
-		addEntry(new SoundLogEntry(System.currentTimeMillis(), soundId, kind,
-			sourceName, sourceId, sourceType, audible));
+
+		exportEntry(new SoundLogEntry(
+			System.currentTimeMillis(),
+			soundId,
+			kind,
+			sourceName,
+			sourceId,
+			sourceType,
+			audible));
 	}
 
-	private void addAmbientSound(AmbientSoundEffect ambient, String sourceName)
+	private void exportAmbientSound(AmbientSoundEffect ambient, String sourceName)
 	{
-		if (ambient == null) return;
+		if (ambient == null)
+		{
+			return;
+		}
+
 		Set<Integer> ids = new LinkedHashSet<>();
-		if (ambient.getSoundEffectId() >= 0) ids.add(ambient.getSoundEffectId());
+		if (ambient.getSoundEffectId() >= 0)
+		{
+			ids.add(ambient.getSoundEffectId());
+		}
+
 		int[] background = ambient.getBackgroundSoundEffectIds();
 		if (background != null)
 		{
-			for (int id : background) if (id >= 0) ids.add(id);
+			for (int id : background)
+			{
+				if (id >= 0)
+				{
+					ids.add(id);
+				}
+			}
 		}
+
 		for (Integer id : ids)
 		{
-			addEntry(new SoundLogEntry(System.currentTimeMillis(), id, SoundKind.AMBIENT,
-				sourceName, null, "Ambient", true));
+			exportEntry(new SoundLogEntry(
+				System.currentTimeMillis(),
+				id,
+				SoundKind.AMBIENT,
+				sourceName,
+				null,
+				"Ambient",
+				true));
 		}
 	}
 
@@ -395,18 +381,11 @@ public class SoundIDerPlugin extends Plugin
 	{
 		clientThread.invokeLater(() ->
 		{
-			if (recording && config.showAmbient() && client.getGameState() == GameState.LOGGED_IN)
+			if (config.logAmbient() && client.getGameState() == GameState.LOGGED_IN)
 			{
 				scanLoadedAmbientSoundsNow();
-				if (config.consumeAmbient()) clearAmbientSounds();
 			}
 		});
-	}
-
-	@SuppressWarnings("deprecation")
-	private void clearAmbientSounds()
-	{
-		client.getAmbientSoundEffects().clear();
 	}
 
 	@SuppressWarnings("deprecation")
@@ -414,19 +393,14 @@ public class SoundIDerPlugin extends Plugin
 	{
 		for (AmbientSoundEffect ambient : client.getAmbientSoundEffects())
 		{
-			addAmbientSound(ambient, "Ambient");
+			exportAmbientSound(ambient, "Ambient");
 		}
-	}
-
-	private void addEntry(SoundLogEntry entry)
-	{
-		exportEntry(entry);
-		SwingUtilities.invokeLater(() -> logModel.addEntry(entry, config.maxEntries()));
 	}
 
 	private void exportEntry(SoundLogEntry entry)
 	{
-		if (!config.exportJsonl() || exportExecutor == null || exportExecutor.isShutdown())
+		ExecutorService executor = exportExecutor;
+		if (executor == null || executor.isShutdown())
 		{
 			return;
 		}
@@ -441,7 +415,7 @@ public class SoundIDerPlugin extends Plugin
 			entry.getSourceType(),
 			entry.isAudible());
 
-		exportExecutor.execute(() ->
+		executor.execute(() ->
 		{
 			try
 			{
@@ -469,27 +443,8 @@ public class SoundIDerPlugin extends Plugin
 		{
 			directory.createDirectories();
 		}
+
 		exportFile = directory.joinSegment(EXPORT_FILE_NAME);
 		return exportFile;
-	}
-
-	private static BufferedImage createIcon()
-	{
-		BufferedImage image = new BufferedImage(16, 16, BufferedImage.TYPE_INT_ARGB);
-		Graphics2D g = image.createGraphics();
-		try
-		{
-			g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-			g.setColor(new Color(220, 138, 0));
-			g.setStroke(new BasicStroke(2.0f));
-			g.drawArc(2, 4, 6, 8, -70, 140);
-			g.drawArc(5, 2, 8, 12, -70, 140);
-			g.fillOval(1, 7, 3, 3);
-		}
-		finally
-		{
-			g.dispose();
-		}
-		return image;
 	}
 }
