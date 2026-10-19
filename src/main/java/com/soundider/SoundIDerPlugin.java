@@ -34,7 +34,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 @PluginDescriptor(
-	name = "Sound IDer",
+	name = "EchoTrace",
 	internalName = "sound-ider",
 	description = "IDs sounds in-game",
 	tags = {"sound", "audio", "debug", "developer", "id", "npc"}
