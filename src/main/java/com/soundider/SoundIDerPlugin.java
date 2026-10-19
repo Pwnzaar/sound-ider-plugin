@@ -36,7 +36,7 @@ import org.slf4j.LoggerFactory;
 @PluginDescriptor(
 	name = "Sound IDer",
 	internalName = "sound-ider",
-	description = "Logs raw RuneLite sound events to a local JSONL file for later inspection.",
+	description = "IDs sounds in-game",
 	tags = {"sound", "audio", "debug", "developer", "id", "npc"}
 )
 public class SoundIDerPlugin extends Plugin
