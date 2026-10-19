@@ -1,8 +1,8 @@
 # Sound IDer
 
-Sound IDer logs raw RuneLite sound events to a local JSONL file for later inspection. It does not display sound IDs in the RuneLite side panel or in a pop-out window.
+Sound IDer identifies RuneLite sound IDs in-game for later inspection and diagnostic cataloguing.
 
-## What is logged
+## What is identified
 
 - Sound Effect events
 - Area Sound events
@@ -14,11 +14,3 @@ Sound IDer logs raw RuneLite sound events to a local JSONL file for later inspec
 - Whether an area sound was audible
 
 Source attribution is best-effort only. If RuneLite does not provide a source directly, Sound IDer may use recent actor activity or an unambiguous actor on the sound tile. If it cannot determine a source safely, the source remains `Unknown`.
-
-## JSONL file
-
-Events are appended to:
-
-`~/.runelite/plugin-data/sound-ider/events.jsonl`
-
-The plugin itself does not display the IDs in RuneLite. The JSONL file is intended for later inspection and diagnostic cataloguing.
