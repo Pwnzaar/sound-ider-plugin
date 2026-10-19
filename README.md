@@ -1,6 +1,6 @@
-# Sound IDer
+# EchoTrace
 
-Sound IDer identifies RuneLite sound IDs in-game for later inspection and diagnostic cataloguing.
+EchoTrace identifies RuneLite sound IDs in-game for later inspection and diagnostic cataloguing.
 
 ## What is identified
 
